@@ -3,7 +3,7 @@
 const puppeteer = require('puppeteer');
 
 const user_urls = [
-    "https://roc.com/recruit.php?uniqid=3mzh", // Kab
+    "https://rofc.com/recruit.php?uniqid=3mzh", // Kab
     //"https://roc.com/recruit.php?uniqid=715e" // cardboard
 ];
 
@@ -11,6 +11,7 @@ const user_urls = [
 async function external_click() {
   const browser = await puppeteer.launch({
     headless: false,
+    args: [ '--disk-cache-dir=./cache' ]
     //args: [ '--proxy-server=127.0.0.1:9876' ]
   });
   
@@ -26,7 +27,7 @@ async function external_click() {
   });
 
   user_urls.forEach(url => {
-    click_user(page, url)
+    click_user(page, url).then((res)=>console.log(res), () => console.log('fail'))
   });
   
   console.log('DOne');
@@ -36,8 +37,14 @@ async function external_click() {
 
 async function click_user(page, url) {
     await page.goto(url);
+    let recform = await page.$('#recruit_form');
+
+    if(recform === null){
+        return 'Error: Could not find recruit form.';
+    }
+    let but = await recform.$('.button');
+    but.click()
     await new Promise(r => setTimeout(r, 2000));
-    console.log('CLICKING USER!');
 }
 
 external_click()
