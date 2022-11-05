@@ -1,0 +1,16 @@
+{
+  "name": "roc-ext-node",
+  "version": "1.0.0",
+  "description": "Automatically performs ROC external clicks",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "roc",
+    "external",
+    "click"
+  ],
+  "author": "matt",
+  "license": "ISC"
+}
