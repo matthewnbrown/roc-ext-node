@@ -12,5 +12,8 @@
     "click"
   ],
   "author": "matt",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "puppeteer": "^19.2.2"
+  }
 }
