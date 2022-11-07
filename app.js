@@ -1,50 +1,135 @@
 'use strict';
 
 const puppeteer = require('puppeteer');
+const https = require('node:https');
+const fs = require('fs');
 
+const useragent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:106.0) Gecko/20100101 Firefox/106.0'
+const clicks = 150
+const proxy = 'geo.iproyal.com:12321'
 const user_urls = [
-    "https://rofc.com/recruit.php?uniqid=3mzh", // Kab
-    //"https://roc.com/recruit.php?uniqid=715e" // cardboard
+    //"https://roc.com/recruit.php?uniqid=3mzh", // Kab
+    "https://roc.com/recruit.php?uniqid=715e" // cardboard
+    //"https://rox.com/recruit.php?uniqid=vdf8" // Viking
 ];
 
+async function load_local(page, filepath) {
+    return page.addScriptTag({
+        path: `${filepath}`
+    })
+}
+async function run_js(page, file_path) {
+    const file_content = fs.existsSync(file_path) ? fs.readFileSync(file_path, 'utf8') : '';
 
-async function external_click() {
-  const browser = await puppeteer.launch({
-    headless: false,
-    args: [ '--disk-cache-dir=./cache' ]
-    //args: [ '--proxy-server=127.0.0.1:9876' ]
-  });
-  
-  const page = await browser.newPage();
-  await page.setRequestInterception(true);
-  page.on('request', (req) => {
-        if(req.resourceType() == 'stylesheet' || req.resourceType() == 'font' || req.resourceType() == 'image'){
-            req.abort();
-    }
-    else {
-        req.continue();
-    }
-  });
-
-  user_urls.forEach(url => {
-    click_user(page, url).then((res)=>console.log(res), () => console.log('fail'))
-  });
-  
-  console.log('DOne');
-  await new Promise(r => setTimeout(r, 2000));
-  await browser.close();
+    return page.evaluate(file_content => {
+        console.log(file_content);
+    }, file_content);
+}
+function download_file(url, options) {
+    let p = new Promise((resolve) => { 
+        https.get(url, options, function (response) {
+            let data = []
+            response.on('data', (d) => {
+                data.push(d)
+             })
+             response.on('end', () => {
+                response.body = data.join('');
+                resolve(response);
+             })
+        }).on('error', (e) => {
+            console.error(e);
+          });;
+    });
+    return p
 }
 
+async function create_page(browser) {
+    let page = await browser.newPage();
+    await page.setRequestInterception(true);
+    page.on('request', async (req) => {
+        let url = req.url()
+
+        if(req.method() != "GET") {
+            console.log(`Detected method ${req.method()}`)
+            req.continue()
+        }
+        else if (url.includes('uniqid')) {
+            req.continue();
+        } else {
+            const options = {
+                uri: url,
+                method: req.method(),
+                headers: req.headers(),
+                body: req.postData(),
+                //usingProxy: true,
+            };
+            let response = await download_file(url, options)
+            req.respond({
+                status: response.statusCode,
+                contentType: response.headers['content-type'],
+                headers: response.headers,
+                body: response.body,
+            });
+        }
+    });
+
+    return page;
+}
+async function external_click() {
+    const browser = await puppeteer.launch({
+        headless: false,
+        args: ['--disk-cache-dir=/puppet_cache',
+               '--allow-file-access-from-files',
+               '--enable-local-file-accesses',
+               `--proxy-server=${proxy}`
+              ]
+    });
+
+    let page = await create_page(browser)
+    await click_all(page);
+
+    console.log('DOne');
+    await browser.close();
+}
+
+async function click_all(page) {
+    for (let i = 0; i < clicks; i++) {
+        console.log(`Loop ${i}`)
+        for (let i = 0; i < user_urls.length; i++) {
+            await click_user(page, user_urls[i]).then((res) => console.log(res), (res) => console.log(res));
+        }
+    }
+}
+
+async function wait_page_load(page) {
+    for(let i = 0; i < 15; i++) {
+        let recmsg = await page.$('#recruitmsg')
+        if(recmsg != null){
+            return;
+        }
+        await new Promise(r => setTimeout(r, 700));
+    }
+}
 async function click_user(page, url) {
     await page.goto(url);
+
     let recform = await page.$('#recruit_form');
 
-    if(recform === null){
+    if (recform === null) {
+        await new Promise(r => setTimeout(r, 1000));
         return 'Error: Could not find recruit form.';
     }
-    let but = await recform.$('.button');
-    but.click()
-    await new Promise(r => setTimeout(r, 2000));
+
+    let butty = await recform.$('.button');
+    //await page.click('#recruit_form .button', {waitUntil: 'domcontentloaded'});
+    await butty.click()
+
+    await wait_page_load(page)
+    let pageurl = await page.url();
+    if (pageurl.includes('uniqid'))
+        await new Promise(r => setTimeout(r, 1000));
+        return 'Failure: Click did not register.'
+    return 'Success'
 }
 
-external_click()
+external_click();
