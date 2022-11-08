@@ -56,6 +56,9 @@ async function create_page(browser) {
         else if (url.includes('uniqid')) {
             req.continue();
         } else {
+            if(url.indexOf('data') == 0){
+                req.continue()
+            } else {
             const options = {
                 uri: url,
                 method: req.method(),
@@ -70,6 +73,7 @@ async function create_page(browser) {
                 headers: response.headers,
                 body: response.body,
             });
+        }
         }
     });
 
@@ -103,10 +107,18 @@ async function click_all(page) {
 
 async function wait_page_load(page) {
     for(let i = 0; i < 15; i++) {
+        let recmsg = null
+        try {
         let recmsg = await page.$('#recruitmsg')
+            console.log(recmsg)
         if(recmsg != null){
             return;
         }
+        } catch (rewriteError) {
+            
+        }
+        // Thirsty has searched far and wide for recruits, reaching at least 100 people today
+        
         await new Promise(r => setTimeout(r, 700));
     }
 }
@@ -125,11 +137,13 @@ async function click_user(page, url) {
     await butty.click()
 
     await wait_page_load(page)
-    let pageurl = await page.url();
-    if (pageurl.includes('uniqid'))
-        await new Promise(r => setTimeout(r, 1000));
-        return 'Failure: Click did not register.'
+
+    try {
+        let recmsg = await page.$('#recruitmsg')
     return 'Success'
+    } catch (rewriteError) {
+        return 'FFailure'
+    }
 }
 
 external_click();
