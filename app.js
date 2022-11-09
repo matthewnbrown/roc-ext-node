@@ -5,17 +5,18 @@ import * as http from 'http';
 import * as https from 'https';
 import * as fs from 'fs'
 
+const proxy_get_req = false
 
 const useragent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:106.0) Gecko/20100101 Firefox/106.0'
-const clicks = 150
+const clicks = 500
 const ip_url = 'https://ipv4.icanhazip.com'
 const proxy = 'geo.iproyal.com:12321'
 const proxyhost = 'geo.iproyal.com';
 const proxyport = 12321;
 const user_urls = [
-    "https://roc.com/recruit.php?uniqid=3mzh", // Kab
-    //"https://roc.com/recruit.php?uniqid=715e" // cardboard
-    //"https://rox.com/recruit.php?uniqid=vdf8" // Viking
+    //"https://roc.com/recruit.php?uniqid=3mzh", // Kab
+    //"https://r.com/recruit.php?uniqid=715e", // cardboard
+    //"https://r.com/recruit.php?uniqid=vdf8" // Viking
 ];
 
 
@@ -58,6 +59,11 @@ function get(url, options) {
                 resolve(res)
             })
         }).on('error',(e) => console.error((e)));
+        r.setTimeout(4000, () => {
+            r.destroy();
+            resp = {body: 'error', error:'timeout'}
+            resolve(resp);
+        })
         r.end()
     })
     return p;
@@ -68,20 +74,66 @@ function post(url, options, postdata) {
     let p = new Promise((resolve) => 
     { 
         console.log(`Proxy: ${url}`)
-        const r = https.request(url, options, (response) => {
-            let data = []
-            response.on('data', (d) => {
+        const r = https.request(url,options, function(res) {
+            const data = []
+            res.on('data', (d) => {
                 data.push(d)
             })
-            response.on('end', () => {
-                response.body = data.join('')
-                resolve(response)
-            });
+
+            res.on('end', () => {
+                res.body = data.join('')
+                resolve(res)
+            })
         }).on('error',(e) => console.error((e)));
+        r.setTimeout(4000, () => {
+            r.destroy();
+            resp = {body: 'error', error:'timeout'}
+            resolve(resp);
+        })
         r.write(postdata)
         r.end();
     });
     return p;
+}
+
+async function handle_post(request) {
+    const options = {
+        method: request.method(),
+        headers: request.headers(),
+    };
+
+    let response = await post(request.url(), options, request.postData());
+    if (response.body == 'error') {
+        console.log(`Error getting page: ${response.error}`)
+    }
+    request.respond({
+        status: response.statusCode,
+        contentType: response.headers['content-type'],
+        headers: response.headers,
+        body: response.body,
+    });
+}
+
+async function handle_get(request) {
+    const options = {
+        headers: request.headers(),
+        body: request.postData(),
+    };
+    let response = await get(url, options);
+
+    if (response.body == 'error') {
+        console.log(`Error getting page: ${response.error}`)
+    } else if(response.body.length > 1) {
+        console.log(`Got ${url}`)
+    } else {
+        console.log(`No body ${url}`)
+    }
+    request.respond({
+        status: response.statusCode,
+        contentType: response.headers['content-type'],
+        headers: response.headers,
+        body: response.body,
+    });
 }
 
 async function create_page(browser) {
@@ -90,56 +142,14 @@ async function create_page(browser) {
  
     page.on('request', async (req) => {
         let url = req.url()
-        if(req.method() != "GET") {
-            const options = {
-                method: req.method(),
-                headers: req.headers(),
-                //usingProxy: true,
-            };
-            //options.headers[':path']= '/recruit.php',
-            //options.headers['fetch']= 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
-            //options.headers['sec-fetch-site']= 'same-origin',
-            //options.headers['sec-fetch-moded']= 'navigate'
-            //options.headers['sec-fetch-dest']= 'document'
-            //options.headers['accept-encoding']= 'gzip, deflate'
-            //options.headers['accept-languate']= 'en-US,en;q=0.9'
-            //options.headers['cache-control']= 'max-age=0'
-            //options.headers.cookie = (await page.cookies()).map((cookie) => { return `${cookie.name}=${cookie.value}`; }).join('; ');
-            console.log(`Detected NON-get ${req}`);
 
-            let response = await post(url, options, req.postData());
-            req.respond({
-                status: response.statusCode,
-                contentType: response.headers['content-type'],
-                headers: response.headers,
-                body: response.body,
-            });
+        if(req.method() == "POST") {
+            await handle_post(req);
         }
-        else if (!url.includes('uniqid222222') && !url.includes(ip_url)) {
-            req.continue();
+        else if(proxy_get_req && url.includes('uniqid') || url.includes(ip_url)) {
+            await handle_get(req)
         } else {
-            if(url.indexOf('data') == 0){
-                req.continue()
-            } else {
-            //url = url.replace('https', 'http')
-            const options = {
-                headers: req.headers(),
-                body: req.postData(),
-                //usingProxy: true,
-            };
-            let response = await get(url, options);
-            if(response.body.length > 1) {
-                console.log(`Got ${url}`)
-            } else {
-                console.log(`No body ${url}`)
-            }
-            req.respond({
-                status: response.statusCode,
-                contentType: response.headers['content-type'],
-                headers: response.headers,
-                body: response.body,
-            });
-        }
+            req.continue()
         }
     });
 
@@ -151,29 +161,34 @@ async function external_click() {
         args: ['--disk-cache-dir=/puppet_cache',
                '--allow-file-access-from-files',
                '--enable-local-file-accesses',
-               //`--proxy-server=${proxy}`
               ]
     });
 
     let page = await create_page(browser)
+
     start_proxy()
-
-    //while(true) {
-    //    await page.goto(ip_url)
-    //    await new Promise(r => setTimeout(r, 1000 ))
-    //}
-    //await page.goto(ip_url)
     await click_all(page);
+    end_proxy()
 
-    console.log('DOne');
+    console.log('Done');
     await browser.close();
 }
 
 async function click_all(page) {
-    for (let i = 0; i < clicks; i++) {
-        console.log(`Loop ${i}`)
+    const doneusers = new Set();
+
+    while (doneusers.size != user_urls.length) {
         for (let i = 0; i < user_urls.length; i++) {
-            await click_user(page, user_urls[i]).then((res) => console.log(res), (res) => console.log(res));
+            if(!doneusers.has(user_urls[i])) {
+                let res = await click_user(page, user_urls[i]);
+
+                if(res == 'done') {
+                    doneusers.add(user_urls[i]);
+                    console.log(`Done user ${user_urls[i]}`)
+                } else {
+                    console.log(res)
+                }
+            }
         }
     }
 }
@@ -182,17 +197,15 @@ async function wait_page_load(page) {
     for(let i = 0; i < 15; i++) {
         let recmsg = null
         try {
-        let recmsg = await page.$('#recruitmsg')
-        console.log(recmsg)
+            recmsg = await page.$('#recruitmsg')
         if(recmsg != null){
             return;
         }
         } catch (rewriteError) {
             
         }
-        // Thirsty has searched far and wide for recruits, reaching at least 100 people today
         
-        await new Promise(r => setTimeout(r, 700));
+        await new Promise(r => setTimeout(r, 500));
     }
 }
 async function click_user(page, url) {
@@ -212,8 +225,13 @@ async function click_user(page, url) {
     await wait_page_load(page)
 
     try {
-        let recmsg = await page.$('#recruitmsg')
-    return 'Success'
+        const recmsg = await page.$('#recruitmsg')
+        const t = await (await recmsg.getProperty('textContent')).jsonValue()
+
+        if (t.includes('100 people today')) {
+            return 'done'
+        }
+    return 'success'
     } catch (rewriteError) {
         return 'FFailure'
     }
