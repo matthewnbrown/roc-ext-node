@@ -5,7 +5,7 @@ import * as http from 'http';
 import * as https from 'https';
 import * as fs from 'fs'
 
-const proxy_get_req = true
+const proxy_get_req = false
 const user_urls = [
     "https://rofc.com/recruit.php?uniqid=3mzh", // Kab
     "https://rofc.com/recruit.php?uniqid=715e", // cardboard
