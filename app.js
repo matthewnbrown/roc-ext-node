@@ -5,7 +5,14 @@ import * as http from 'http';
 import * as https from 'https';
 import * as fs from 'fs'
 
-const proxy_get_req = false
+const proxy_get_req = true
+const user_urls = [
+    "https://rofc.com/recruit.php?uniqid=3mzh", // Kab
+    "https://rofc.com/recruit.php?uniqid=715e", // cardboard
+    //"https://r.com/recruit.php?uniqid=vdf8" // Viking
+];
+
+
 
 const useragent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:106.0) Gecko/20100101 Firefox/106.0'
 const clicks = 500
@@ -13,12 +20,8 @@ const ip_url = 'https://ipv4.icanhazip.com'
 const proxy = 'geo.iproyal.com:12321'
 const proxyhost = 'geo.iproyal.com';
 const proxyport = 12321;
-const user_urls = [
-    //"https://roc.com/recruit.php?uniqid=3mzh", // Kab
-    //"https://r.com/recruit.php?uniqid=715e", // cardboard
-    //"https://r.com/recruit.php?uniqid=vdf8" // Viking
-];
 
+var closeReqTimeout;
 
 function start_proxy(){
     global.GLOBAL_AGENT.HTTP_PROXY = 'http://geo.iproyal.com:12321'
@@ -42,56 +45,54 @@ async function run_js(page, file_path) {
     }, file_content);
 }
 
-
-function get(url, options) {
-
+function make_request(request, options) {
     let p = new Promise((resolve) => 
     { 
+        const url = request.url()
+        options['timeout'] = 2000
         console.log(`Proxy: ${url}`)
         const r = https.request(url,options, function(res) {
             const data = []
             res.on('data', (d) => {
+                clearTimeout(closeReqTimeout)
+                closeReqTimeout = setTimeout(() => {
+                    r.destroy();
+                    let resp = {body: 'error', error:'socket open too long'}
+                    resolve(resp);
+                }, 5000)
                 data.push(d)
             })
 
             res.on('end', () => {
+                clearTimeout(closeReqTimeout)
                 res.body = data.join('')
                 resolve(res)
             })
-        }).on('error',(e) => console.error((e)));
-        r.setTimeout(4000, () => {
+        }).on('error',(e) => {
+            clearTimeout(closeReqTimeout)
+            let resp = {body: 'error', error:'e'};
+            resolve(resp);
+        }).on('timeout', () => {
+            clearTimeout(closeReqTimeout)
             r.destroy();
-            resp = {body: 'error', error:'timeout'}
+            let resp = {body: 'error', error:'inner request timeout'}
+            resolve(resp);
+        });
+        r.setTimeout(2000, () => {
+            clearTimeout(closeReqTimeout)
+            r.destroy();
+            let resp = {body: 'error', error:'request timeout'}
             resolve(resp);
         })
-        r.end()
-    })
-    return p;
-}
-/// todo: TIMEOUT
-/// https://stackoverflow.com/questions/6214902/how-to-set-a-timeout-on-a-http-request-in-node
-function post(url, options, postdata) {
-    let p = new Promise((resolve) => 
-    { 
-        console.log(`Proxy: ${url}`)
-        const r = https.request(url,options, function(res) {
-            const data = []
-            res.on('data', (d) => {
-                data.push(d)
-            })
-
-            res.on('end', () => {
-                res.body = data.join('')
-                resolve(res)
-            })
-        }).on('error',(e) => console.error((e)));
-        r.setTimeout(4000, () => {
-            r.destroy();
-            resp = {body: 'error', error:'timeout'}
-            resolve(resp);
-        })
-        r.write(postdata)
+        if (options.method == 'POST'){  
+            r.write(request.postData())
+        }
         r.end();
+        closeReqTimeout = setTimeout(() => {
+            r.destroy();
+            let resp = {body: 'error', error:'socket open too long'}
+            resolve(resp);
+        }, 5000)
     });
     return p;
 }
@@ -102,38 +103,47 @@ async function handle_post(request) {
         headers: request.headers(),
     };
 
-    let response = await post(request.url(), options, request.postData());
+    let response = await make_request(request, options, );
     if (response.body == 'error') {
         console.log(`Error getting page: ${response.error}`)
     }
-    request.respond({
-        status: response.statusCode,
-        contentType: response.headers['content-type'],
-        headers: response.headers,
-        body: response.body,
-    });
+
+    if(response.body == 'error') {
+        console.log(`Error: ${response.error}`)
+        request.abort()
+    } else {
+        request.respond({
+            status: response.statusCode,
+            contentType: response.headers['content-type'],
+            headers: response.headers,
+            body: response.body,
+        });
+    }
 }
 
 async function handle_get(request) {
     const options = {
+        method: request.method(),
         headers: request.headers(),
         body: request.postData(),
     };
-    let response = await get(url, options);
+    let response = await make_request(request, options);
 
     if (response.body == 'error') {
         console.log(`Error getting page: ${response.error}`)
-    } else if(response.body.length > 1) {
-        console.log(`Got ${url}`)
-    } else {
-        console.log(`No body ${url}`)
     }
-    request.respond({
-        status: response.statusCode,
-        contentType: response.headers['content-type'],
-        headers: response.headers,
-        body: response.body,
-    });
+
+    if(response.body == 'error') {
+        console.log(`Error: ${response.error}`)
+        request.abort()
+    } else {
+        request.respond({
+            status: response.statusCode,
+            contentType: response.headers['content-type'],
+            headers: response.headers,
+            body: response.body,
+        });
+    }
 }
 
 async function create_page(browser) {
@@ -198,22 +208,43 @@ async function wait_page_load(page) {
         let recmsg = null
         try {
             recmsg = await page.$('#recruitmsg')
-        if(recmsg != null){
-            return;
-        }
-        } catch (rewriteError) {
-            
-        }
-        
+            if(recmsg != null){
+                return;
+            }
+        } catch (rewriteError) {}
+
+        let errmsg = null
+        try {
+            errmsg = await page.$('#main-message')
+            if(errmsg != null){
+                return;
+            }
+        } catch (rewriteError) {}
+
         await new Promise(r => setTimeout(r, 500));
     }
 }
+
 async function click_user(page, url) {
-    await page.goto(url);
+    try {
+        await page.goto(url);
+    } catch (rewriteError) {
+        return 'Page didn\'t load'
+    }
+
+    try {
+        const recmsg = await page.$('#recruitmsg')
+        const t = await (await recmsg.getProperty('textContent')).jsonValue()
+
+        if (t.includes('100 people today')) {
+            return 'done'
+        }
+    } catch (rewriteError) { }
 
     let recform = await page.$('#recruit_form');
 
     if (recform === null) {
+        // BUG WHEN FINISHED. GETS STUCK HERE
         await new Promise(r => setTimeout(r, 1000));
         return 'Error: Could not find recruit form.';
     }
@@ -233,7 +264,7 @@ async function click_user(page, url) {
         }
     return 'success'
     } catch (rewriteError) {
-        return 'FFailure'
+        return 'Failure'
     }
 }
 
